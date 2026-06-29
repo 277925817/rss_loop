@@ -4,6 +4,11 @@
 
 本文档定义 AI 新闻聚合系统 MVP 的本地开发工作流状态机。
 
+This file is the product delivery workflow only. It is executed under the L3
+loop control plane defined by `LOOP.md`. Multi-agent state, run history, budget,
+kill switches, and active lane ownership live in `STATE.md`,
+`loop-run-log.md`, `loop-budget.md`, and `loop-constraints.md`.
+
 目标是让 Codex 可以按确定性流程自动执行：
 
 ```text
@@ -13,6 +18,10 @@ Plan -> Implement -> Test -> Review -> Fix -> Re-test -> Summarize -> Iterate
 直到 `docs/08_acceptance.md` 中 `ACC-STOP-001` 到 `ACC-STOP-010` 全部为 `PASS`，并且 `STOP_ALLOWED = true`。
 
 本 workflow 只依赖当前仓库、项目文档、本地测试、fixture、mock 和 fixed clock。不得依赖 GitHub Actions、外部 CI、真实 RSS、真实网页、真实 LLM、生产数据库、网络时间或人工主观判断。
+
+L3 loop execution may schedule this workflow through `LOOP.md`, but this
+workflow remains local and deterministic. Product implementation must not start
+when `STATE.md` has `product_delivery_pause: true`.
 
 Source of truth:
 
@@ -33,6 +42,17 @@ MVP task source:
 - If `tasks.md` is missing, Codex must create it from unresolved implementation gaps, failed test stages, and failed acceptance gates.
 - A task is complete only when its scoped tests pass and it does not cause any acceptance regression.
 - Tasks with `acceptance_gate: none` are workflow housekeeping tasks only. They are ignored by acceptance gate coverage and cannot satisfy any `ACC-STOP-*` gate.
+- `tasks.md` is not a multi-agent run log. Live loop state belongs in `STATE.md`; audit history belongs in `loop-run-log.md`.
+- Product task execution must record `run_id`, `loop_id`, `task_id`, `branch`, and `worktree_path` in `STATE.md` before implementation begins.
+
+Maker/checker policy:
+
+- The Implementer may change scoped product files and produce test evidence.
+- The Implementer must not mark the task as passed.
+- The Verifier must be a separate agent, fresh session, or clearly separate instruction context.
+- The Verifier must approve scope and evidence before `SUMMARIZE` can persist a task as `passed`.
+- The Acceptance Judge must be separate from the Implementer and must evaluate `docs/08_acceptance.md` from structured evidence only.
+- A third failed attempt on the same task routes to `TASK_BLOCKED` and `STATE.md` `Human Inbox`; a fourth autonomous attempt is forbidden by `loop-constraints.md`.
 
 Minimal task record format:
 
@@ -139,6 +159,7 @@ If a task exceeds retry limit:
 ### 2.3 Determinism Rules
 
 - Task order must be stable: sort by `task_priority_order`, then by task id ascending inside the same priority bucket. The tie-breaker must always be `task_id` ascending.
+- L3 Product Delivery must select or create exactly one isolated worktree before entering `IMPLEMENT`; direct edits to `main` are forbidden for product-changing work.
 - If a task lacks `priority`, `LOAD_TASKS` must derive it with one deterministic rule: failed acceptance gate mapping first; otherwise failed test stage order; otherwise canonical doc order `docs/01_prd.md -> docs/08_acceptance.md`; otherwise `refactor_tasks`. Do not use semantic guessing or multi-source fallback.
 - For fields other than `priority`, missing task fields must be filled with explicit defaults, not inferred values: `status: pending`, `active_state: none`, `last_updated_state: none`, `acceptance_gate: none`, `attempts: 0`, `evidence: none`, `test_report: none`, `intentionally_out_of_scope: false`, `blocker: none`.
 - Test stage order must follow `docs/07_test_spec.md#2.13`: `static -> unit -> contract -> api -> integration -> replay -> snapshot -> e2e`.
@@ -155,10 +176,10 @@ If a task exceeds retry limit:
 
 | Field | Definition |
 | --- | --- |
-| entry condition | Workflow starts, or Codex resumes an unfinished workflow. |
-| actions | Read `docs/01_prd.md` to `docs/08_acceptance.md`; detect available local commands; verify workspace can run local tests; check whether `tasks.md` exists. |
+| entry condition | Workflow starts under `LOOP.md`, or Codex resumes an unfinished workflow. |
+| actions | Read `loop-constraints.md`, `STATE.md`, `loop-budget.md`, `docs/01_prd.md` to `docs/08_acceptance.md`; detect available local commands; verify workspace can run local tests; check whether `tasks.md` exists. |
 | exit condition | Required source documents are readable and workflow inputs are known. |
-| failure handling | If a required source document is missing or unreadable, enter `WORKFLOW_BLOCKED`. If local test commands cannot run because the local environment is unavailable, enter `ENV_BLOCKED`. If local test commands are missing but can be implemented in the repo, create tasks according to `docs/07_test_spec.md`. |
+| failure handling | If `STATE.md` has `product_delivery_pause: true`, enter `WORKFLOW_BLOCKED` for product implementation and route the blocker to `STATE.md` `Human Inbox`. If a required source document is missing or unreadable, enter `WORKFLOW_BLOCKED`. If local test commands cannot run because the local environment is unavailable, enter `ENV_BLOCKED`. If local test commands are missing but can be implemented in the repo, create tasks according to `docs/07_test_spec.md`. |
 
 ### LOAD_TASKS
 
@@ -174,8 +195,8 @@ If a task exceeds retry limit:
 | Field | Definition |
 | --- | --- |
 | entry condition | A `pending` or previously failed task is selected. |
-| actions | Read the task source documents; identify files likely to change; define smallest implementation slice; define expected test stage and acceptance gate impact. |
-| exit condition | A deterministic task plan exists with scope, files, test commands/stages and rollback boundary. |
+| actions | Read the task source documents; identify files likely to change; define smallest implementation slice; define expected test stage and acceptance gate impact; reserve an isolated worktree and record it in `STATE.md`. |
+| exit condition | A deterministic task plan exists with scope, files, test commands/stages, worktree path and rollback boundary. |
 | failure handling | If scope cannot be derived from documents, mark the task `task_blocked` with the missing decision and enter `TASK_BLOCKED`. |
 
 ### IMPLEMENT
@@ -183,8 +204,8 @@ If a task exceeds retry limit:
 | Field | Definition |
 | --- | --- |
 | entry condition | `PLAN` produced a scoped implementation plan. |
-| actions | Modify only files required by the task; preserve unrelated user changes; keep implementation aligned with `docs/06_dev_rules.md`; update contract docs when behavior changes. |
-| exit condition | Code or documentation changes for the task are complete and ready for local tests. |
+| actions | Modify only files required by the task inside the assigned worktree; preserve unrelated user changes; keep implementation aligned with `docs/06_dev_rules.md`; update contract docs when behavior changes. |
+| exit condition | Code or documentation changes for the task are complete and ready for local tests. The Implementer has not marked the task as passed. |
 | failure handling | If implementation exposes a contract conflict, stop coding that slice and return to `PLAN`. If the conflict is between documents, apply the priority order from `docs/06_dev_rules.md`. |
 
 ### TEST
@@ -201,7 +222,7 @@ If a task exceeds retry limit:
 | Field | Definition |
 | --- | --- |
 | entry condition | Scoped machine tests passed and the task is not `task_blocked`. |
-| actions | Run static design verification only: check code structure against `docs/02_arch.md`, `docs/03_ui_spec.md`, `docs/04_data_model.md`, `docs/05_api_contract.md` and `docs/06_dev_rules.md`; check architecture fit, schema/document diffs, dependency graph boundaries, internal field leaks and non-goal features. Treat API contract, data model and UI checks as static design/spec alignment only. Do not execute code or validate runtime outputs, API JSON responses, DB state, DOM snapshots, logs or generated reports. Do not treat review as a substitute for tests. |
+| actions | A separate Verifier runs static design verification only: check code structure against `docs/02_arch.md`, `docs/03_ui_spec.md`, `docs/04_data_model.md`, `docs/05_api_contract.md` and `docs/06_dev_rules.md`; check architecture fit, schema/document diffs, dependency graph boundaries, internal field leaks and non-goal features. Treat API contract, data model and UI checks as static design/spec alignment only. Do not execute code or validate runtime outputs, API JSON responses, DB state, DOM snapshots, logs or generated reports. Do not treat review as a substitute for tests. |
 | exit condition | Review finds no blocking issue, or produces a structured list of required fixes. |
 | failure handling | If review fails, enter `FIX`. If review reveals a task-local conflict that cannot be resolved from priority rules, mark task `task_blocked` and enter `TASK_BLOCKED`. If review reveals workflow metadata or document consistency cannot be interpreted deterministically, enter `WORKFLOW_BLOCKED`. |
 
@@ -227,8 +248,8 @@ If a task exceeds retry limit:
 
 | Field | Definition |
 | --- | --- |
-| entry condition | `REVIEW` passed for a task that is not `task_blocked`. |
-| actions | Update only the MVP task summary fields in `tasks.md`: task status, `active_state: none`, evidence path, test report path and acceptance mapping through `acceptance_gate`. |
+| entry condition | Separate Verifier approved `REVIEW` for a task that is not `task_blocked`. |
+| actions | Brain Controller updates only the MVP task summary fields in `tasks.md`: task status, `active_state: none`, evidence path, test report path and acceptance mapping through `acceptance_gate`; append run outcome to `loop-run-log.md`. |
 | exit condition | Task state is persisted as `passed`. |
 | failure handling | If `tasks.md` cannot be updated, enter `WORKFLOW_BLOCKED` with a persistence failure. Missing task persistence must never advance to `ACCEPTANCE`. |
 
@@ -237,7 +258,7 @@ If a task exceeds retry limit:
 | Field | Definition |
 | --- | --- |
 | entry condition | Acceptance entry is triggered: `tasks.md` is loaded, `tasks.count > 0`, every task is `passed` or `task_blocked`, no task is `pending` or `in_progress`, and no task has `active_state` in `FIX` or `RE_TEST`. |
-| actions | Create one immutable `tasks_snapshot = load_tasks("tasks.md")` and `tasks_hash_before = hash_file("tasks.md")` at entry. Always evaluate all required gates in `docs/08_acceptance.md`: `ACC-STOP-001` to `ACC-STOP-010`, using only `tasks_snapshot` for task-derived evidence. This is where gate coverage, existing evidence, linked test reports, mandatory assertions and leak checks are validated. Gate coverage may use only tasks where `status == passed`, `evidence` exists and `test_report` exists. `task_blocked` tasks must not contribute to any gate coverage. Before `DONE`, recompute `tasks_hash_after = hash_file("tasks.md")` and require `tasks_hash_before == tasks_hash_after`. Use only structured evidence allowed by `docs/08_acceptance.md#3`. Never reuse previous task status or previous gate status as a substitute for full gate validation. |
+| actions | A separate Acceptance Judge creates one immutable `tasks_snapshot = load_tasks("tasks.md")` and `tasks_hash_before = hash_file("tasks.md")` at entry. Always evaluate all required gates in `docs/08_acceptance.md`: `ACC-STOP-001` to `ACC-STOP-010`, using only `tasks_snapshot` for task-derived evidence. This is where gate coverage, existing evidence, linked test reports, mandatory assertions and leak checks are validated. Gate coverage may use only tasks where `status == passed`, `evidence` exists and `test_report` exists. `task_blocked` tasks must not contribute to any gate coverage. Before `DONE`, recompute `tasks_hash_after = hash_file("tasks.md")` and require `tasks_hash_before == tasks_hash_after`. Use only structured evidence allowed by `docs/08_acceptance.md#3`. Never reuse previous task status or previous gate status as a substitute for full gate validation. |
 | exit condition | Every gate has status `PASS`, `FAIL`, `UNKNOWN`, `TASK_BLOCKED`, `WORKFLOW_BLOCKED` or `ENV_BLOCKED`, and `STOP_ALLOWED` has been computed. |
 | failure handling | If any gate is `FAIL` or `UNKNOWN`, enter `ITERATE` with the failed or unproven gate evidence. If a task-local unresolved blocker prevents a gate from being proven, enter `TASK_BLOCKED`. If workflow metadata, task records or report generation logic are inconsistent, enter `WORKFLOW_BLOCKED`. If the local environment cannot execute required verification, enter `ENV_BLOCKED`. Missing evidence is a failed gate unless the evidence generator itself is unavailable. |
 

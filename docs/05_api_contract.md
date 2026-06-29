@@ -13,7 +13,7 @@ API 只暴露 UI 必需能力：
 - 手动刷新 RSS。
 - 添加 / 删除 / 启用 / 停用 RSS 源。
 
-API 不暴露数据库内部字段，不暴露 `pipeline_state`、`is_selected`、`content_raw`、`content_full`、`has_translate_failed`。
+API 不暴露数据库内部字段，不暴露 `pipeline_state`、`is_selected`、`content_raw`、`content_full`、`has_translate_failed`、`is_deleted`。
 
 ## 2. API Conventions（接口约定）
 
@@ -88,7 +88,7 @@ type NewsStatus = "ready" | "translated" | "translation_failed";
 
 Status mapping:
 
-- `translated`: `title_zh`、`summary_zh`、`content_zh` all exist.
+- `translated`: `title_zh`、`summary_zh`、`content_zh` all exist and are non-empty.
 - `translation_failed`: not `translated` and `has_translate_failed = 1`.
 - `ready`: not `translated` and not `translation_failed`.
 
@@ -96,7 +96,7 @@ Status is an API/UI projection. It is not stored as a database column.
 
 Status derivation priority:
 
-1. If all translated fields exist, return `translated`.
+1. If all translated fields exist and are non-empty, return `translated`.
 2. Else if `has_translate_failed = 1`, return `translation_failed`.
 3. Otherwise return `ready`.
 
@@ -104,7 +104,7 @@ Partial translated fields must not change `status` by themselves and must not be
 
 Status consistency rules:
 
-- `status = "translated"` requires `title_zh`、`summary_zh`、`content_zh` to exist.
+- `status = "translated"` requires non-empty `title_zh`、`summary_zh`、`content_zh` to exist.
 - `status = "translated"` must never be returned if any translated field is missing.
 - `status = "ready"` must not include `summary_zh` or `content_zh`.
 - `status = "translation_failed"` must not include `summary_zh` or `content_zh`.
@@ -134,27 +134,41 @@ type NewsItem = {
 ### 3.3 NewsListItem
 
 ```ts
-type NewsListItem = NewsItem & {
-  summary_zh?: string;
+type TranslatedNewsListItem = NewsItem & {
+  status: "translated";
+  summary_zh: string;
 };
+
+type PendingNewsListItem = NewsItem & {
+  status: "ready" | "translation_failed";
+};
+
+type NewsListItem = TranslatedNewsListItem | PendingNewsListItem;
 ```
 
-`summary_zh` is returned only when `status = "translated"`.
+`summary_zh` is required and returned only when `status = "translated"`.
 
 ### 3.4 NewsDetailItem
 
 ```ts
-type NewsDetailItem = NewsItem & {
-  summary_zh?: string;
-  content_zh?: string;
+type TranslatedNewsDetailItem = NewsItem & {
+  status: "translated";
+  summary_zh: string;
+  content_zh: string;
 };
+
+type PendingNewsDetailItem = NewsItem & {
+  status: "ready" | "translation_failed";
+};
+
+type NewsDetailItem = TranslatedNewsDetailItem | PendingNewsDetailItem;
 ```
 
 Detail field rules:
 
 - If `status = "translated"`:
   - `content_zh` is required.
-  - `summary_zh` is optional.
+  - `summary_zh` is required.
 - If `status != "translated"`:
   - `summary_zh` MUST NOT exist.
   - `content_zh` MUST NOT exist.
@@ -181,7 +195,7 @@ Display field language rules:
 
 - `title`: Chinese when translated title exists; otherwise fallback to `original_title`.
 - `original_title`: original source title and may be non-Chinese.
-- `summary_zh`: optional, but if returned it must be Chinese and must never contain raw RSS summary.
+- `summary_zh`: required for translated list and detail responses, must be Chinese and must never contain raw RSS summary.
 - `content_zh`: only returned in translated detail responses, must be Chinese, and must never contain raw article content.
 - API must never return `content_raw` or `content_full`.
 
@@ -280,6 +294,7 @@ Response:
         "id": "2",
         "title": "新的 AI 模型发布",
         "original_title": "New AI model released",
+        "summary_zh": "这是一条中文摘要。",
         "source_name": "OpenAI Blog",
         "source_url": "https://example.com/news/2",
         "published_at": "2026-06-28T07:00:00Z",
@@ -367,7 +382,9 @@ None.
 
 Data rule:
 
-- Return all RSS sources.
+- Return all non-deleted RSS sources.
+- Disabled but non-deleted sources are returned so the UI can re-enable them.
+- Soft-deleted sources are not returned.
 - Sort by `created_at ASC`.
 - Return `SourceItem[]`.
 
@@ -404,8 +421,10 @@ type CreateSourceRequest = {
 Validation:
 
 - `name` is required and must not be empty.
-- `rss_url` is required and must be a valid URL.
+- `rss_url` is required and must be a public `http/https` URL.
+- Local addresses, private network addresses and non-`http/https` URLs return `400`.
 - Duplicate `rss_url` returns `409`.
+- Soft-deleted rows still reserve their `rss_url`; re-adding the same URL returns `409` unless a future reset-configuration flow is introduced.
 - New source uses `is_enabled = true`.
 - New source uses `fetch_frequency = "twice_daily"`.
 
@@ -482,10 +501,12 @@ Path:
 
 Behavior:
 
-- MVP delete is implemented as disabling the source: `is_enabled = 0`.
-- Disabling a source does not affect existing news items.
+- MVP delete is implemented as internal soft deletion: `is_deleted = 1` and `is_enabled = 0`.
+- `is_deleted` is an internal database field and must not appear in API responses.
+- Soft deletion does not affect existing news items.
 - Historical data remains visible in all APIs.
 - Only future ingestion is stopped.
+- `GET /api/sources` must not return soft-deleted sources after deletion.
 - Return `404` if source does not exist.
 
 Response:

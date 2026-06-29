@@ -1,0 +1,56 @@
+{
+  "reports": [
+    {
+      "actual": {
+        "product_stage_ready": false
+      },
+      "assertions": [
+        {
+          "actual": {
+            "product_stage_ready": false
+          },
+          "diff": {
+            "reason": "Loop report tooling is available, but product implementation has not started."
+          },
+          "expected": {
+            "product_stage_ready": true
+          },
+          "id": "static-product-not-implemented",
+          "leak_detection": {
+            "forbidden_field_count": 0,
+            "matched_paths": [],
+            "method": "structured_field_scan",
+            "sensitive_content_count": 0,
+            "target": "test_report"
+          },
+          "status": "failed",
+          "type": "report_schema"
+        }
+      ],
+      "clock_source": "fixed_clock_fixture@v1",
+      "diff": {
+        "status": "product task DAG remains pending"
+      },
+      "error_category": "unknown",
+      "expected": {
+        "product_stage_ready": true
+      },
+      "failure_type": "contract",
+      "fixture_set": "mvp_acceptance_fixture@v1",
+      "fixture_version": "v1",
+      "mock_set": "mvp_mock@v1",
+      "mock_version": "v1",
+      "node": "static",
+      "schema_ref": "07_test_spec.md#6",
+      "schema_version": "v1",
+      "stage": "static",
+      "status": "failed",
+      "test_id": "LOOP-BOOTSTRAP-STATIC",
+      "timestamp": "2026-06-29T16:15:45Z",
+      "trace_id": "2026-06-29T16:20:00Z-static-sentinel-static"
+    }
+  ],
+  "run_id": "2026-06-29T16:20:00Z-static-sentinel",
+  "schema_ref": "docs/07_test_spec.md#6",
+  "schema_version": "v1"
+}

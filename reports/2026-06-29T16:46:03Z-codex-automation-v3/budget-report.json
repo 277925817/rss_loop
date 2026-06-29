@@ -1,0 +1,27 @@
+{
+  "checks_run": [
+    "budget_contract",
+    "known_loop_caps",
+    "run_log_entries",
+    "loop_pause_all"
+  ],
+  "findings": [],
+  "known_loops": [
+    "daily-triage",
+    "docs-drift",
+    "acceptance-sweeper",
+    "product-delivery",
+    "issue-triage",
+    "pr-babysitter",
+    "ci-sweeper",
+    "dependency-sweeper",
+    "changelog-drafter",
+    "post-merge-cleanup"
+  ],
+  "required_next_action": "continue",
+  "run_id": "2026-06-29T16:46:03Z-codex-automation-v3",
+  "run_log_entry_count": 6,
+  "schema_ref": "docs/11_evidence_and_reports.md#budget-report",
+  "schema_version": "v1",
+  "status": "passed"
+}

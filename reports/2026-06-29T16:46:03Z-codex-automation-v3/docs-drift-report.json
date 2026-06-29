@@ -1,0 +1,20 @@
+{
+  "checks_run": [
+    "old_stack_blocker",
+    "python3_command",
+    "control_order",
+    "old_prd_table_names",
+    "old_prd_lifecycle_state",
+    "old_arch_data_flow",
+    "ui_toggle_conflict",
+    "ui_toggle_binding_missing",
+    "task_retry_mismatch",
+    "non_canonical_stage_labels"
+  ],
+  "findings": [],
+  "required_next_action": "continue",
+  "run_id": "2026-06-29T16:46:03Z-codex-automation-v3",
+  "schema_ref": "docs/11_evidence_and_reports.md#docs-drift",
+  "schema_version": "v1",
+  "status": "passed"
+}

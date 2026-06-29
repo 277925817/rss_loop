@@ -1,0 +1,32 @@
+{
+  "checks_run": [
+    "old_stack_blocker",
+    "python3_command",
+    "control_order",
+    "old_prd_table_names",
+    "old_prd_lifecycle_state",
+    "old_arch_data_flow",
+    "ui_toggle_conflict",
+    "ui_toggle_binding_missing",
+    "source_soft_delete_contract",
+    "llm_scoring_fallback_contract",
+    "ui_source_delete_contract",
+    "data_contract_drift",
+    "api_source_soft_delete_contract",
+    "api_translated_summary_contract",
+    "api_translated_summary_optional",
+    "dev_rules_llm_timeout_contract",
+    "test_spec_timeout_fallback_contract",
+    "test_spec_is_deleted_contract",
+    "readiness_yaml_tabs",
+    "task_retry_mismatch",
+    "non_canonical_stage_labels",
+    "tasks_contract_drift"
+  ],
+  "findings": [],
+  "required_next_action": "continue",
+  "run_id": "2026-06-30T00:00:00Z-contract-drift-fix",
+  "schema_ref": "docs/11_evidence_and_reports.md#docs-drift",
+  "schema_version": "v1",
+  "status": "passed"
+}

@@ -1,0 +1,39 @@
+{
+  "evidence_paths": [
+    "LOOP.md",
+    "STATE.md",
+    "docs/08_acceptance.md",
+    "docs/09_loop_readiness.md",
+    "docs/10_loop_usage.md",
+    "docs/11_evidence_and_reports.md",
+    "docs/12_command_matrix.md",
+    "loop-budget.md",
+    "loop-constraints.md",
+    "loop-run-log.md",
+    "skills/acceptance-judge/SKILL.md",
+    "skills/docs-drift/SKILL.md",
+    "skills/loop-triage/SKILL.md",
+    "skills/product-implementer/SKILL.md",
+    "skills/verifier/SKILL.md",
+    "workflows.md"
+  ],
+  "failed_or_blocked_gates": [],
+  "gate_status": {
+    "LOOP-READY-001": "PASS",
+    "LOOP-READY-002": "PASS",
+    "LOOP-READY-003": "PASS",
+    "LOOP-READY-004": "PASS",
+    "LOOP-READY-005": "PASS",
+    "LOOP-READY-006": "PASS",
+    "LOOP-READY-007": "PASS",
+    "LOOP-READY-008": "PASS",
+    "LOOP-READY-009": "PASS",
+    "LOOP-READY-010": "PASS"
+  },
+  "loop_ready": true,
+  "notes": {},
+  "required_next_action": "continue",
+  "run_id": "2026-06-29T16:18:00Z-readiness-final",
+  "schema_ref": "docs/09_loop_readiness.md",
+  "schema_version": "09_loop_readiness@l3-control-v1"
+}

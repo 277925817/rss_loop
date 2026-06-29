@@ -2,7 +2,7 @@
 
 ## 0. Global Hard Constraints（全局硬规则）
 
-- API 响应不得包含 `content_raw`、`content_full`、完整正文、完整 prompt，否则数据泄漏检查必须失败。
+- API 响应不得包含 `content_raw`、`content_full`、`is_deleted`、完整正文、完整 prompt，否则数据泄漏检查必须失败。
 - 日志不得包含超过 `1024` 字符的正文类字段，否则必须在写日志前裁剪。
 - `pipeline_state` 只能由 backend pipeline service 写入，否则 code review 必须拒绝该变更。
 - `status` 只能由 API 层按 `05_api_contract.md` 投影，否则不得写入数据库。
@@ -36,7 +36,7 @@
 - 每个组件必须对应 `03_ui_spec.md` 的最终实现单元，否则必须删除。
 - 页面组件只负责组合组件和加载数据，否则业务逻辑必须下沉到 API client 或 service。
 - `NewsCard`、`ArticleView`、`HighScoreList` 只能消费 API DTO 字段，否则字段泄漏检查必须失败。
-- 前端不得读取 `pipeline_state`、`is_selected`、`content_raw`、`content_full`。
+- 前端不得读取 `pipeline_state`、`is_selected`、`content_raw`、`content_full`、`is_deleted`。
 - 前端只能根据 API `status` 渲染新闻状态，否则状态逻辑会重复实现。
 - 全局状态只能保存跨页面必需数据，否则必须改成本地 state。
 - 禁止用 `useEffect` 保存可由 props 计算出的状态，否则会产生双状态。
@@ -71,25 +71,32 @@
 - 翻译触发条件必须是 `pipeline_state = fetched` 且存在可用内容。
 - 翻译成功必须写入 `title_zh`、`summary_zh`、`content_zh`。
 - 翻译失败不得写入部分中文字段，否则 API status 投影会错误。
-- Source 禁用只能停止未来抓取，不得删除历史新闻。
+- Source 禁用只能停止未来抓取且仍可在配置 API 中返回；Source 删除只能写入内部软删除事实并停止未来抓取，不得删除历史新闻或暴露 `is_deleted`。
 - API 不得更新 pipeline 字段，否则用户请求会绕过处理流程。
 
 ## 5. LLM Interaction Rules（LLM 调用规范）
 
 - LLM 请求必须通过统一 client 入口，否则 mock 和限流无法集中处理。
-- LLM scoring 输出必须按 JSON schema 校验，否则不得写入 `score`。
+- LLM scoring 输出必须按 JSON schema 校验，否则不得写入 LLM 返回的 `score`。
 - LLM translation 输出必须按 JSON schema 校验，否则不得写入中文字段。
 - If LLM output fails JSON schema validation, classify as `validation_llm_error`, not `llm_error`.
-- 无效 LLM response 必须记录为 `llm` 错误，否则不得进入数据库。
-- LLM retry max = `2`，超过后必须标记 `llm` 错误。
-- If LLM scoring or translation fails after retry max, `pipeline_state` must remain unchanged and item must be marked as `llm_error`.
+- 无效 LLM response 必须用固定错误分类写入 `processing_log`，否则不得继续静默处理。
+- LLM retry max = `2`。
+- If LLM scoring fails after retry max, the system must write fallback `score = 0`,
+  `is_selected = 0`, advance `pipeline_state` to `scored`, and write
+  `processing_log(stage = score, success = 0)` with `error_category` set to
+  `validation_llm_error`, `llm`, or `timeout`.
+- If LLM translation fails after retry max, `pipeline_state` must remain
+  `fetched`, partial Chinese fields must not be written, `has_translate_failed`
+  must be set to `1`, and `processing_log(stage = translate, success = 0)` must
+  record `error_category`.
 - LLM prompt 变更必须有测试 fixture 更新，否则输出契约无法验证。
 - LLM prompt 不得包含完整 `content_full` 之外的敏感配置，否则日志和错误处理会泄漏。
 - LLM mock 必须覆盖 scoring 和 translation，否则 pipeline 测试会依赖外部服务。
 
 ## 6. Error Handling Rules（错误处理规范）
 
-- 所有异常必须归类为 `network`、`parsing`、`llm`、`database`、`validation`、`unknown`。
+- 所有异常必须归类为 `network`、`parsing`、`llm`、`database`、`validation`、`timeout`、`unknown`。
 - 禁止 silent fail，任何失败必须写入 `processing_log` 或应用日志。
 - API validation error 必须返回结构化 error，否则前端无法稳定处理。
 - RSS 解析失败必须归类为 `parsing`，否则源质量无法判断。

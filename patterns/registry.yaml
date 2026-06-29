@@ -1,0 +1,128 @@
+patterns:
+  - id: daily-triage
+    level: L3-state-maintenance
+    cadence: daily
+    entry_skill: skills/loop-triage/SKILL.md
+    state: STATE.md
+    run_log: loop-run-log.md
+    may_modify_product_code: false
+    required_reports:
+      - reports/<run_id>/triage-report.json
+
+  - id: docs-drift
+    level: L3-documentation
+    cadence: daily-or-after-doc-change
+    entry_skill: skills/docs-drift/SKILL.md
+    state: STATE.md
+    run_log: loop-run-log.md
+    may_modify_product_code: false
+    required_reports:
+      - reports/<run_id>/docs-drift-report.json
+
+  - id: acceptance-sweeper
+    level: L3-verification
+    cadence: after-verifier-approval-or-daily
+    entry_skill: skills/acceptance-judge/SKILL.md
+    state: STATE.md
+    run_log: loop-run-log.md
+    may_modify_product_code: false
+    required_reports:
+      - reports/<run_id>/acceptance-report.json
+
+  - id: product-delivery
+    level: L3-implementation
+    cadence: continuous-while-actionable
+    entry_skill: skills/product-implementer/SKILL.md
+    verifier_skill: skills/verifier/SKILL.md
+    state: STATE.md
+    run_log: loop-run-log.md
+    worktree_required: true
+    may_modify_product_code: true
+    required_reports:
+      - reports/<run_id>/test-report.json
+      - reports/<run_id>/verifier-report.json
+      - evidence/<run_id>/changed-files.txt
+
+  - id: issue-triage
+    level: Codex-report-only-operations
+    cadence: daily-or-every-2h
+    entry_skill: .codex/skills/issue-triage/SKILL.md
+    state: issue-triage-state.md
+    run_log: loop-run-log.md
+    may_modify_product_code: false
+    week_one_mode: report-only
+    github_access: gh-read-only
+    required_reports:
+      - reports/<run_id>/issue-triage-report.json
+
+  - id: pr-babysitter
+    level: Codex-report-only-pr-watch
+    cadence: every-15m-working-hours
+    entry_skill: .codex/skills/pr-review-triage/SKILL.md
+    verifier_agent: .codex/agents/verifier.toml
+    state: pr-babysitter-state.md
+    run_log: loop-run-log.md
+    may_modify_product_code: false
+    week_one_mode: report-only
+    github_access: gh-read-only
+    forbidden_actions:
+      - merge
+      - auto-close
+      - push-main
+    required_reports:
+      - reports/<run_id>/pr-babysitter-report.json
+
+  - id: ci-sweeper
+    level: Codex-report-only-ci-watch
+    cadence: every-15m-working-hours
+    entry_skill: .codex/skills/ci-triage/SKILL.md
+    verifier_agent: .codex/agents/verifier.toml
+    state: ci-sweeper-state.md
+    run_log: loop-run-log.md
+    may_modify_product_code: false
+    week_one_mode: report-only
+    github_access: gh-read-only
+    max_attempts_same_root_cause: 3
+    required_reports:
+      - reports/<run_id>/ci-sweeper-report.json
+
+  - id: dependency-sweeper
+    level: Codex-report-only-dependency-watch
+    cadence: every-6h
+    entry_skill: .codex/skills/dependency-triage/SKILL.md
+    state: dependency-sweeper-state.md
+    run_log: loop-run-log.md
+    may_modify_product_code: false
+    week_one_mode: report-only
+    human_gate:
+      - major-version-bump
+      - secrets
+      - deployment
+    required_reports:
+      - reports/<run_id>/dependency-sweeper-report.json
+
+  - id: changelog-drafter
+    level: Codex-report-only-release-notes
+    cadence: daily
+    entry_skill: .codex/skills/changelog-scan/SKILL.md
+    secondary_skill: .codex/skills/draft-release-notes/SKILL.md
+    state: changelog-drafter-state.md
+    run_log: loop-run-log.md
+    may_modify_product_code: false
+    week_one_mode: report-only
+    human_gate:
+      - changelog-write
+      - release-tag
+    required_reports:
+      - reports/<run_id>/changelog-report.json
+
+  - id: post-merge-cleanup
+    level: Codex-report-only-cleanup-watch
+    cadence: daily
+    entry_skill: .codex/skills/post-merge-scan/SKILL.md
+    state: post-merge-state.md
+    run_log: loop-run-log.md
+    may_modify_product_code: false
+    week_one_mode: report-only
+    required_reports:
+      - reports/<run_id>/post-merge-report.json

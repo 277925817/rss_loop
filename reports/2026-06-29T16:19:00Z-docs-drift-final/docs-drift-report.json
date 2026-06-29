@@ -1,0 +1,13 @@
+{
+  "checks_run": [
+    "old_stack_blocker",
+    "python3_command",
+    "control_order"
+  ],
+  "findings": [],
+  "required_next_action": "continue",
+  "run_id": "2026-06-29T16:19:00Z-docs-drift-final",
+  "schema_ref": "docs/11_evidence_and_reports.md#docs-drift",
+  "schema_version": "v1",
+  "status": "passed"
+}

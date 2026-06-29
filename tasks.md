@@ -9,15 +9,30 @@ meta:
     runner_external: true
     no_task_run_verify_fix_dsl: true
     no_report_per_task: true
+  loop_control:
+    control_plane: "LOOP.md"
+    live_state: "STATE.md"
+    run_log: "loop-run-log.md"
+    budget: "loop-budget.md"
+    constraints: "loop-constraints.md"
+    readiness_gate: "docs/09_loop_readiness.md"
+    usage_runbook: "docs/10_loop_usage.md"
+    evidence_contract: "docs/11_evidence_and_reports.md"
+    role_skills: "skills/"
+    state_policy: "tasks.md is the product DAG and acceptance mapping only; it is not the multi-agent live state or audit log."
+    l3_policy: "Product Delivery may execute tasks only when STATE.md product_delivery_pause is false and docs/09_loop_readiness.md allows the loop."
   reports:
     scope: "stage_level"
     format: "stage + result + failing_area"
     stages:
-      - static_unit
-      - pipeline_test
-      - api_test
-      - ui_test
-      - integration_test
+      - static
+      - unit
+      - contract
+      - api
+      - integration
+      - replay
+      - snapshot
+      - e2e
       - acceptance
   gates:
     - id: G1
@@ -34,7 +49,7 @@ meta:
       maps_to: ["ACC-STOP-001", "ACC-STOP-009", "ACC-STOP-010"]
   stop_condition: "G1, G2, G3, G4 pass and docs/08_acceptance.md STOP_ALLOWED = true"
   retry_policy:
-    max_retry: 2
+    max_retry: 3
     fallback: "record failing_area + isolate owner task + retry"
 
 dag:
@@ -59,7 +74,7 @@ dag:
       acceptance_criteria:
         - "backend entrypoint exists."
         - "frontend entrypoint exists."
-        - "static_unit stage result = pass for repo runtime skeleton."
+        - "static stage result = pass for repo runtime skeleton."
       failure_criteria:
         - "FAIL if this task implements DB schema, fixtures, product pipeline, API behavior, or UI screens."
 
@@ -82,9 +97,10 @@ dag:
       acceptance_criteria:
         - "Application table set equals source, news_item, processing_log."
         - "source.rss_url and news_item.canonical_url are UNIQUE."
+        - "source.is_deleted exists as an internal soft-delete field and is indexed."
         - "news_item.pipeline_state accepts only raw, scored, fetched."
         - "processing_log enforces exactly one owner: source_id or news_item_id."
-        - "static_unit stage result = pass for DB schema constraints."
+        - "static stage result = pass for DB schema constraints."
       failure_criteria:
         - "FAIL if this task implements DB init hook, seed logic, fixtures, mocks, pipeline behavior, API behavior, or UI screens."
         - "FAIL if excluded tables or fields exist: rss_source, news_task, translation_status, content_source, title_domain_hash, is_ready, display_mode, category table."
@@ -109,8 +125,9 @@ dag:
       acceptance_criteria:
         - "Init hook creates the schema from TASK-002A in an empty SQLite database."
         - "Default source seed count is 7 on first init and unchanged on second init."
+        - "Default source seed does not restore a default URL that has an existing is_deleted = 1 row."
         - "Seed rows satisfy source table constraints."
-        - "static_unit stage result = pass for DB init hook and seed."
+        - "static stage result = pass for DB init hook and seed."
       failure_criteria:
         - "FAIL if this task changes schema design, constraints, indexes, fixtures, mocks, pipeline behavior, API behavior, or UI screens."
 
@@ -136,7 +153,7 @@ dag:
         - "Mock set includes scoring valid/invalid/timeout cases."
         - "Mock set includes translation valid/invalid/timeout/partial cases."
         - "Fixed clock includes 09:00, 18:00, and non-trigger cases."
-        - "static_unit stage result = pass for local config fixtures mocks."
+        - "static stage result = pass for local config fixtures mocks."
       failure_criteria:
         - "FAIL if this task implements DB schema, pipeline business logic, API behavior, or UI screens."
 
@@ -150,7 +167,7 @@ dag:
       priority: "acceptance_gate_failures"
       test_scope: ["unit", "integration"]
       depends_on: ["TASK-002B", "TASK-003"]
-      description: "Read enabled RSS sources from fixture-backed clients, parse items, normalize links, and store new raw news items."
+      description: "Read enabled and non-deleted RSS sources from fixture-backed clients, parse items, normalize links, and store new raw news items."
       inputs:
         - "Enabled source records."
         - "RSS fixtures with success, malformed feed, duplicate link, and missing summary cases."
@@ -160,9 +177,9 @@ dag:
         - "processing_log(stage = crawl) records source success/failure."
       acceptance_criteria:
         - "Fixture with 2 RSS items produces 2 normalized input objects."
-        - "Only is_enabled = 1 sources are ingested."
+        - "Only is_enabled = 1 AND is_deleted = 0 sources are ingested."
         - "Malformed/failing source writes processing_log success = 0 and does not block other sources."
-        - "pipeline_test stage result = pass for ingest."
+        - "integration stage result = pass for ingest."
       failure_criteria:
         - "FAIL if ingest calls live RSS URLs or writes scored/fetched state."
 
@@ -182,14 +199,14 @@ dag:
         - "Mock scoring responses for valid, invalid JSON, timeout, missing title, and missing URL cases."
       outputs:
         - "Valid raw items receive score and pipeline_state = scored."
-        - "Invalid scoring output does not advance as a successful score."
-        - "processing_log(stage = score) records success/failure."
+        - "Invalid scoring output does not write the invalid LLM score."
+        - "processing_log(stage = score) records success/failure and error_category."
       acceptance_criteria:
         - "Scoring request contains title, summary, source, published_at, original_link."
         - "Valid score is numeric and within 0-100."
         - "Missing title or original_link scores 0."
-        - "Invalid scoring JSON retries at most 2 times."
-        - "pipeline_test stage result = pass for score."
+        - "Invalid scoring JSON retries at most 2 times, then writes fallback score = 0, is_selected = 0, and pipeline_state = scored."
+        - "integration stage result = pass for score."
       failure_criteria:
         - "FAIL if tests call live LLM or scoring writes fetched state."
 
@@ -216,7 +233,7 @@ dag:
         - "score = 59 sets is_selected = 0."
         - "is_selected does not change pipeline_state."
         - "Duplicate canonical_url count in news_item/displayable output <= 1."
-        - "pipeline_test stage result = pass for filter."
+        - "integration stage result = pass for filter."
       failure_criteria:
         - "FAIL if filter uses selected/ready/translated as database pipeline_state."
 
@@ -243,7 +260,7 @@ dag:
         - "Fetch failure with content_raw fallback still reaches fetched."
         - "Fetch failure with no content_raw is not displayable."
         - "processing_log(stage = fetch) records success/failure."
-        - "pipeline_test stage result = pass for fetch."
+        - "integration stage result = pass for fetch."
       failure_criteria:
         - "FAIL if tests access live webpages or fetch unselected items."
 
@@ -264,13 +281,13 @@ dag:
       outputs:
         - "Translation success writes title_zh, summary_zh, content_zh."
         - "Translation failure writes no partial zh fields and sets has_translate_failed = 1."
-        - "processing_log(stage = translate) records success/failure."
+        - "processing_log(stage = translate) records success/failure and error_category."
       acceptance_criteria:
         - "Translation request contains original_title, original_summary, original_content, source, score."
         - "Valid translation writes non-empty title_zh, summary_zh, content_zh."
         - "Invalid translation writes 0 zh fields."
         - "Translation does not mutate pipeline_state beyond fetched."
-        - "pipeline_test stage result = pass for translate."
+        - "integration stage result = pass for translate."
       failure_criteria:
         - "FAIL if category_zh is persisted/exposed or tests call live LLM."
 
@@ -293,7 +310,7 @@ dag:
         - "Run summary includes started_at and finished_at."
         - "Run summary includes source_success_count and source_failure_count."
         - "Run summary includes rss_item_count, new_item_count, scored_item_count, selected_item_count, fetched_item_count, translated_item_count, and failure details."
-        - "pipeline_test stage result = pass for pipeline run record."
+        - "integration stage result = pass for pipeline run record."
       failure_criteria:
         - "FAIL if this task implements trigger scheduling, API response shaping, UI behavior, or duplicate pipeline business logic."
 
@@ -321,7 +338,7 @@ dag:
         - "Concurrent refresh signal does not emit a second refresh_requested signal."
         - "Trigger layer contains no RSS parsing, LLM scoring, filtering, fetching, translation, or run summary aggregation."
         - "Trigger layer MUST NOT produce ANY persistent state."
-        - "pipeline_test stage result = pass for refresh trigger signal."
+        - "integration stage result = pass for refresh trigger signal."
       failure_criteria:
         - "FAIL if trigger layer writes DB rows, processing logs, files, run records, summaries, scheduler state, external worker state, queue state, progress endpoint, live time assertions, or duplicate pipeline logic."
 
@@ -346,7 +363,7 @@ dag:
         - "latest_news sorts by published_at DESC."
         - "top_ranked_news length <= 10 and sorts by score DESC, published_at DESC."
         - "Response contains no forbidden internal fields."
-        - "api_test stage result = pass for home."
+        - "api stage result = pass for home."
       failure_criteria:
         - "FAIL if API returns raw English body/summary or layout-column metadata."
 
@@ -366,11 +383,11 @@ dag:
       outputs:
         - "NewsDetailItem response or structured 404."
       acceptance_criteria:
-        - "Translated detail includes content_zh."
+        - "Translated detail includes non-empty summary_zh and content_zh."
         - "ready and translation_failed details omit summary_zh and content_zh."
         - "Missing or non-displayable item returns 404 error envelope."
         - "Response contains no forbidden internal fields."
-        - "api_test stage result = pass for news detail."
+        - "api stage result = pass for news detail."
       failure_criteria:
         - "FAIL if non-translated detail returns raw body, null content_zh, or placeholder content."
 
@@ -384,20 +401,20 @@ dag:
       priority: "api_contract_failures"
       test_scope: ["contract", "api"]
       depends_on: ["TASK-002B", "TASK-003"]
-      description: "Implement GET/POST/PATCH/DELETE /api/sources for RSS source management."
+      description: "Implement GET/POST/PATCH/DELETE /api/sources for RSS source management with internal soft deletion."
       inputs:
         - "Valid, duplicate, empty, invalid, local, private, disable-all, and missing-source cases."
       outputs:
-        - "SourceItem list/create/update responses and 204 delete."
+        - "SourceItem list/create/update responses and 204 soft delete."
       acceptance_criteria:
-        - "GET /api/sources returns SourceItem[] sorted by created_at ASC."
+        - "GET /api/sources returns non-deleted SourceItem[] sorted by created_at ASC, including disabled but non-deleted sources."
         - "POST valid public RSS URL returns 201."
         - "Invalid/local/private/duplicate source requests return stable errors and do not insert rows."
         - "PATCH rejects disabling all sources with 409."
-        - "DELETE disables source, returns 204 with no body, and preserves historical news."
-        - "api_test stage result = pass for sources."
+        - "DELETE sets is_deleted = 1 and is_enabled = 0, returns 204 with no body, removes the source from GET /api/sources, and preserves historical news."
+        - "api stage result = pass for sources."
       failure_criteria:
-        - "FAIL if delete physically removes historical news_item rows."
+        - "FAIL if delete physically removes historical news_item rows or exposes is_deleted in API responses."
 
     - id: TASK-014
       name: "API refresh"
@@ -419,7 +436,7 @@ dag:
         - "POST /api/refresh returns 200 with data.refreshed_at."
         - "Concurrent refresh does not emit a second refresh signal."
         - "Response exposes no task, queue, worker, retry, progress, run summary, processing logs, or internal fields."
-        - "api_test stage result = pass for refresh."
+        - "api stage result = pass for refresh."
       failure_criteria:
         - "FAIL if refresh endpoint exposes run summary, processing logs, progress endpoints, or pipeline internals."
 
@@ -439,11 +456,11 @@ dag:
       outputs:
         - "Home page, NewsCard, HighScoreList, status/score/source markers, refresh interaction."
       acceptance_criteria:
-        - "Translated card shows Chinese title and summary_zh."
+        - "Translated card shows Chinese title and non-empty summary_zh."
         - "ready and translation_failed cards show original_title/status and render 0 summary_zh/content_zh nodes."
         - "HighScoreList shows <= 10 items and no summaries."
         - "Refresh button disables as 刷新中 and reloads GET /api/home after refresh succeeds."
-        - "ui_test stage result = pass for home."
+        - "integration stage result = pass for home."
       failure_criteria:
         - "FAIL if Home UI reads database/internal fields or adds unlisted interactions."
 
@@ -467,7 +484,7 @@ dag:
         - "ready ArticleView polls detail endpoint and renders no English body."
         - "translation_failed ArticleView renders failure state and original link, with 0 content_zh nodes."
         - "404 renders 新闻不存在或不可展示."
-        - "ui_test stage result = pass for article."
+        - "integration stage result = pass for article."
       failure_criteria:
         - "FAIL if ArticleView directly jumps to original site instead of internal route."
 
@@ -487,11 +504,11 @@ dag:
       outputs:
         - "Source page, SourceForm, and SourceRow."
       acceptance_criteria:
-        - "Source list renders all sources."
+        - "Source list renders all non-deleted sources returned by GET /api/sources, including disabled sources."
         - "Empty form disables submit; invalid URL shows inline error."
         - "Create success clears inputs and reloads list."
-        - "Delete success visually removes the row."
-        - "ui_test stage result = pass for sources."
+        - "Delete success reloads GET /api/sources and visually removes the row because the API no longer returns soft-deleted sources."
+        - "integration stage result = pass for sources."
       failure_criteria:
         - "FAIL if UI exposes advanced settings, task progress, retry controls, or processing logs."
 
@@ -510,7 +527,7 @@ dag:
         - "Clean temporary SQLite database."
         - "RSS, article HTML, LLM, source, and fixed-clock fixtures."
       outputs:
-        - "Pipeline creates scored, selected, fetched, translated, and translation_failed DB facts."
+        - "Pipeline creates scored and fetched DB facts, selected filtering facts, and translation success/failure facts for API/UI projection."
         - "Partial source/fetch/translation failures remain isolated in DB facts."
       acceptance_criteria:
         - "Full pipeline creates at least 1 displayable DB item."
@@ -518,7 +535,7 @@ dag:
         - "Duplicate canonical_url appears once in DB displayable query."
         - "processing_log contains DB facts for crawl, score, fetch, and translate success/failure."
         - "No live RSS, live webpage, live LLM, production DB, or current system time is used."
-        - "integration_test stage result = pass for pipeline only."
+        - "integration stage result = pass for pipeline only."
       failure_criteria:
         - "FAIL if pipeline integration asserts API response shape, frontend DOM, trigger behavior, run summary correctness, or manual visual judgment."
 
@@ -545,8 +562,8 @@ dag:
         - "score = 60 item appears through API; score = 59 item does not."
         - "Duplicate canonical_url appears once through API."
         - "Detail API returns content_zh only for translated item."
-        - "API JSON contains no forbidden internal fields."
-        - "integration_test stage result = pass for API only."
+        - "API JSON contains no forbidden internal fields, including is_deleted."
+        - "integration stage result = pass for API only."
       failure_criteria:
         - "FAIL if API integration asserts frontend DOM, pipeline internals, DB schema details, or manual visual judgment."
 
@@ -573,8 +590,8 @@ dag:
         - "ready and translation_failed UI render no summary_zh/content_zh nodes."
         - "ArticleView renders content_zh only for translated detail."
         - "Source UI create/delete states work against API payloads."
-        - "Rendered DOM contains no forbidden internal fields."
-        - "integration_test stage result = pass for UI only."
+        - "Rendered DOM contains no forbidden internal fields, including is_deleted."
+        - "integration stage result = pass for UI only."
       failure_criteria:
         - "FAIL if UI integration asserts DB state, API implementation internals, pipeline internals, or manual visual judgment."
 
@@ -600,7 +617,7 @@ dag:
       depends_on: ["TASK-009", "TASK-018", "TASK-019", "TASK-020"]
       description: "Evaluate four MVP gates from stage-level evidence and map them to docs/08_acceptance.md STOP_ALLOWED."
       inputs:
-        - "Stage-level results: static_unit, pipeline_test, api_test, ui_test, integration_test."
+        - "Stage-level results: static, unit, contract, api, integration, replay, snapshot, e2e."
         - "Gate mapping from meta.gates."
       outputs:
         - "G1-G4 pass/fail."

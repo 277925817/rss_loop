@@ -1,0 +1,33 @@
+{
+  "evidence_paths": [],
+  "failed_or_unproven_gates": [
+    "ACC-STOP-001",
+    "ACC-STOP-002",
+    "ACC-STOP-003",
+    "ACC-STOP-004",
+    "ACC-STOP-005",
+    "ACC-STOP-006",
+    "ACC-STOP-007",
+    "ACC-STOP-008",
+    "ACC-STOP-009",
+    "ACC-STOP-010"
+  ],
+  "gate_status": {
+    "ACC-STOP-001": "UNKNOWN",
+    "ACC-STOP-002": "UNKNOWN",
+    "ACC-STOP-003": "UNKNOWN",
+    "ACC-STOP-004": "UNKNOWN",
+    "ACC-STOP-005": "UNKNOWN",
+    "ACC-STOP-006": "UNKNOWN",
+    "ACC-STOP-007": "UNKNOWN",
+    "ACC-STOP-008": "UNKNOWN",
+    "ACC-STOP-009": "UNKNOWN",
+    "ACC-STOP-010": "UNKNOWN"
+  },
+  "notes": "Product tasks have not been executed; acceptance cannot pass from loop tooling alone.",
+  "required_next_action": "continue",
+  "run_id": "2026-06-29T16:30:00Z-l3-hardening-final",
+  "schema_ref": "docs/08_acceptance.md",
+  "schema_version": "08_acceptance@codex-stop-v5",
+  "stop_allowed": false
+}

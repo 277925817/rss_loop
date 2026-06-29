@@ -6,7 +6,7 @@
 - 验证翻译字段只通过 `title_zh`、`summary_zh`、`content_zh` 映射到 API/UI。
 - 验证 API contract 不破坏 `05_api_contract.md`。
 - 验证 UI 只按 `NewsItem` / `NewsListItem` / `NewsDetailItem` 渲染。
-- 验证 API/UI 不暴露 `pipeline_state`、`is_selected`、`content_raw`、`content_full`、`has_translate_failed`。
+- 验证 API/UI 不暴露 `pipeline_state`、`is_selected`、`content_raw`、`content_full`、`has_translate_failed`、`is_deleted`。
 
 ### 1.1 Pipeline Graph Awareness
 - 系统按 DAG 测试，不只按线性链路测试。
@@ -57,7 +57,7 @@ isolation: strict_mock
 - 禁止自造缩写和模糊变量名，例如 `tmp`、`data1`、`foo`、`srcNm`、`pubAt`。
 - 单个函数超过 `60` 行、单个文件超过 `300` 行时必须失败。
 - API 调用必须集中在 API client；UI 组件不得直接拼接 endpoint 字符串。
-- Frontend 不得读取 `pipeline_state`、`is_selected`、`content_raw`、`content_full` 或任何数据库字段名。
+- Frontend 不得读取 `pipeline_state`、`is_selected`、`content_raw`、`content_full`、`is_deleted` 或任何数据库字段名。
 - `pipeline_state` 只能由 backend pipeline service 写入；API handler 和 frontend 写入必须失败。
 - API handler 不得直接返回 DB model；必须返回 DTO。
 - SQL/data access 必须集中在 repository 或 database helper。
@@ -71,7 +71,7 @@ isolation: strict_mock
 - Translation mapper：固定翻译 JSON → 中文字段。
 - API projector：内部对象 → `NewsListItem` / `NewsDetailItem`。
 - API status projector：`title_zh`、`summary_zh`、`content_zh`、`has_translate_failed` → `ready | translated | translation_failed`。
-- Error classifier：异常 → `network | parsing | llm | database | validation | unknown`，LLM schema validation failure → `validation_llm_error`。
+- Error classifier：异常 → `network | parsing | llm | database | validation | timeout | unknown`，LLM schema validation failure → `validation_llm_error`。
 - Log sanitizer：正文、prompt、token、密钥字段裁剪或移除。
 
 ### 2.2 Contract Test（API 契约）
@@ -83,7 +83,7 @@ isolation: strict_mock
 - 所有成功响应必须使用 `{ "data": ... }` envelope；`204` 必须无 body。
 - 所有错误响应必须使用 `{ "error": { "code": "...", "message": "..." } }`。
 - API response 字段必须使用 `snake_case`，ID 必须以 string 返回，timestamp 必须为 ISO 8601 UTC。
-- API response 必须拒绝 `pipeline_state`、`is_selected`、`content_raw`、`content_full`、`has_translate_failed`、完整 prompt 和内部 DB model 字段。
+- API response 必须拒绝 `pipeline_state`、`is_selected`、`content_raw`、`content_full`、`has_translate_failed`、`is_deleted`、完整 prompt 和内部 DB model 字段。
 - DB schema contract 必须校验 `source`、`news_item`、`processing_log` 表、字段、约束和索引。
 - Test report contract 必须通过 JSON Schema 校验。
 
@@ -95,10 +95,10 @@ isolation: strict_mock
 - `GET /api/home` 必须返回 `latest_news` 和 `top_ranked_news`。
 - `GET /api/news/{id}` 必须返回可展示 `NewsDetailItem`。
 - `POST /api/refresh` 必须返回 `refreshed_at`。
-- `GET /api/sources` 必须返回按 `created_at ASC` 排序的 `SourceItem[]`。
+- `GET /api/sources` 必须返回按 `created_at ASC` 排序的未删除 `SourceItem[]`，并包含禁用但未删除的 source。
 - `POST /api/sources` 必须测试成功创建、缺少 name、空 name、缺少 rss_url、非法 URL、本地/私有地址、重复 URL。
 - `PATCH /api/sources/{id}` 必须测试启用、停用、source 不存在、禁止关闭全部 source。
-- `DELETE /api/sources/{id}` 必须测试 `204` 无 body、source 不存在返回 `404`、历史新闻仍可见。
+- `DELETE /api/sources/{id}` 必须测试 `204` 无 body、source 不存在返回 `404`、内部软删除后 `GET /api/sources` 不再返回该 source、历史新闻仍可见。
 - API response 不得出现非法内部字段。
 - Non-goal APIs 必须不存在：user/login/search/category/comment/favorite/share/task progress/retry/admin/versioning。
 
@@ -210,7 +210,7 @@ isolation: strict_mock
 - RSS URL 无效：错误归类为 `parsing` 或 `network`，不得 silent fail。
 - 默认 RSS source bootstrap：空库首次启动时写入默认源；已有 source 配置时不得重复写入。
 - 预置 source 被删除/禁用后，不得在下一次启动或刷新时自动恢复。
-- 只抓取 `is_enabled = 1` 的 source。
+- 只抓取 `is_enabled = 1 AND is_deleted = 0` 的 source。
 - 单个 source 抓取失败必须写入 `processing_log(stage=crawl, success=0)`，且其他 source 继续处理。
 
 ### 3.1.1 Scheduler 与 Refresh
@@ -232,7 +232,7 @@ isolation: strict_mock
 - 写入 `score` 后必须立即计算 `is_selected`，默认 threshold 为 `60`。
 - `is_selected = 1` 不得改变 `pipeline_state`；`pipeline_state` 只允许 `raw → scored → fetched`。
 - JSON schema 错误：缺少 `score` 时归类为 `validation_llm_error`。
-- retry 上限：连续失败超过 `2` 次后不继续推进该 item，并按 `06_dev_rules.md` 保持 `pipeline_state` 不被错误推进。
+- retry 上限：scoring 连续失败超过 `2` 次后不得写入无效 LLM 返回值；系统必须写入 fallback `score = 0`、`is_selected = 0`，将 `pipeline_state` 推进到 `scored`，并写入失败 `processing_log(stage=score, success=0)`。
 
 ### 3.3 翻译层
 - Translation trigger：仅当 `pipeline_state = fetched` 且 `content_full IS NOT NULL OR content_raw IS NOT NULL` 时触发。
@@ -240,10 +240,10 @@ isolation: strict_mock
 - Translation response JSON 必须通过 schema validation；`title_zh`、`summary_zh`、`content_zh` 必须非空。
 - 翻译输入优先使用 `content_full`；无全文时使用 `content_raw`。
 - 翻译成功：`title_zh` 映射到 API `title`。
-- 中文摘要：`summary_zh` 只在 `translated` 时返回。
+- 中文摘要：`summary_zh` 只在 `translated` 时返回，且 translated list/detail response 中必须非空。
 - 中文正文：`content_zh` 只在详情接口且 `translated` 时返回。
 - 翻译失败：失败 item 不返回 `summary_zh`、`content_zh`。
-- 翻译失败：不得写入部分中文字段，必须设置 `has_translate_failed = 1`，失败原因写入 `processing_log(stage=translate, success=0)`。
+- 翻译失败：不得写入部分中文字段，必须保持 `pipeline_state = fetched`，设置 `has_translate_failed = 1`，失败原因和 `error_category` 写入 `processing_log(stage=translate, success=0)`。
 - 翻译成功：必须设置 `has_translate_failed = 0`。
 - 部分翻译：只有 `title_zh` 或只有 `summary_zh` 时不得返回 `translated`。
 - API status priority：完整中文字段优先投影为 `translated`；否则 `has_translate_failed = 1` 投影为 `translation_failed`；否则投影为 `ready`。
@@ -261,7 +261,7 @@ isolation: strict_mock
 - `GET /api/news/{id}` 对 `ready` / `translation_failed` 不返回 `summary_zh`、`content_zh`。
 - `POST /api/refresh` 并发调用不触发第二次执行，仍返回 `200`。
 - `POST /api/refresh` 无 request body，不返回 task ID、queue、worker、retry 或 progress 字段。
-- `GET /api/sources` 返回所有 source，按 `created_at ASC` 排序。
+- `GET /api/sources` 返回所有未删除 source，按 `created_at ASC` 排序；禁用但未删除的 source 仍返回。
 - `POST /api/sources` 成功返回 `201`、`is_enabled = true`、`fetch_frequency = twice_daily`。
 - `POST /api/sources` 空 name、空 rss_url、非法 URL、本地地址和私有地址返回结构化 `400`，且数据库不新增记录。
 - `POST /api/sources` 重复 RSS URL 返回 `409`。
@@ -270,7 +270,7 @@ isolation: strict_mock
 - `PATCH /api/sources/{id}` 禁止关闭全部源，返回 `409`。
 - `DELETE /api/sources/{id}` 返回 `204` 且无 body。
 - `DELETE /api/sources/{id}` source 不存在返回 `404`。
-- `DELETE /api/sources/{id}` 以禁用实现，历史新闻仍通过 API 可见，未来 ingestion 停止。
+- `DELETE /api/sources/{id}` 以内软删除实现，设置 `is_deleted = 1` 和 `is_enabled = 0`；历史新闻仍通过 API 可见，未来 ingestion 停止，配置 API 不再返回该 source。
 - 所有 API response 必须通过非法字段黑名单检查。
 - 所有 endpoint 必须覆盖成功用例和至少一个错误用例。
 - 所有错误用例必须断言稳定 `error.code`。
@@ -297,19 +297,20 @@ isolation: strict_mock
 
 ### 3.6 数据模型与持久化层
 - SQLite application schema 必须只保留 MVP 核心表：`source`、`news_item`、`processing_log`；SQLite 内部表不计入应用表集合。
-- `source.rss_url` 必须唯一；`source.is_enabled` 必须可索引。
+- `source.rss_url` 必须唯一；`source.is_enabled` 和 `source.is_deleted` 必须可索引。
 - `news_item.canonical_url` 必须唯一。
 - `news_item.pipeline_state` 只允许 `raw`、`scored`、`fetched`。
 - `pipeline_state = scored` 必须满足 `score IS NOT NULL`。
 - `is_selected` 必须由 threshold 计算，不得作为 pipeline 状态。
 - `content_raw` 保存 RSS 摘要或原始内容；`content_full` 只保存抓取全文。
 - 不得保存 `content_source`、`title_domain_hash`、`translation_status`、`is_ready`、`display_mode`、独立任务队列表或多语言表。
+- `source.is_deleted` 是内部字段，必须存在于 schema，但不得出现在 API response 或 UI DOM。
 - `processing_log` 必须满足 `source_id` 与 `news_item_id` 恰好一个非空。
 - `processing_log.stage` 只允许 `crawl`、`score`、`fetch`、`translate`。
 - `processing_log` 不驱动任务调度；它只记录处理结果。
 - 删除或禁用 source 后，历史 `news_item` 必须保留。
 - 所有 DB timestamp 必须为 ISO 8601 UTC string。
-- 必须验证 `news_item.source_id`、`news_item.pipeline_state`、`news_item.published_at`、`news_item.score`、`processing_log(source_id, stage)`、`processing_log(news_item_id, stage, success)`、`processing_log.created_at` 索引存在。
+- 必须验证 `news_item.source_id`、`news_item.pipeline_state`、`news_item.published_at`、`news_item.score`、`processing_log(source_id, stage)`、`processing_log(news_item_id, stage, success)`、`processing_log.created_at`、`source.is_deleted` 索引存在。
 
 ### 3.7 内容抓取层
 - 原文页面可访问且能抽取正文时，必须写入 `content_full`。
@@ -319,11 +320,11 @@ isolation: strict_mock
 - 抓取成功或兜底成功后，`pipeline_state` 必须更新为 `fetched`。
 
 ### 3.8 错误处理、日志与可观测性
-- 所有异常必须归类为 `network`、`parsing`、`llm`、`database`、`validation`、`unknown`。
+- 所有异常必须归类为 `network`、`parsing`、`llm`、`database`、`validation`、`timeout`、`unknown`。
 - LLM schema validation failure 必须归类为 `validation_llm_error`。
 - 禁止 silent fail；失败必须写入 `processing_log` 或应用日志。
 - RSS 解析失败必须归类为 `parsing`。
-- 网络超时必须归类为 `network`。
+- 网络或 LLM 超时必须归类为 `timeout`。
 - 未知异常必须转换为 `unknown`，不得暴露内部细节。
 - 捕获异常后不得继续写入成功状态。
 - 错误 message 不得包含完整正文、prompt、token 或密钥。
@@ -435,7 +436,7 @@ isolation: strict_mock
 - 性能：100 条 RSS item 的 parse + dedupe + mock scoring 在本地 SQLite 下必须在 5 秒内完成。
 - 稳定性：LLM 连续失败后 item 不得假成功进入 translated UI。
 - 数据一致性：API 返回字段必须与 UI 渲染字段一致。
-- 数据泄漏：API response 中不得出现 `content_raw`、`content_full`、完整 prompt。
+- 数据泄漏：API response 中不得出现 `content_raw`、`content_full`、`is_deleted`、完整 prompt。
 - 数据泄漏：日志、测试报告、错误响应不得出现完整正文、完整 prompt、密钥、token。
 - 幂等性：重复 refresh 不得创建重复新闻。
 - 可维护性：静态合规测试必须阻止未记录 endpoint、未记录 UI 行为、未记录组件和跨层字段泄漏。
@@ -478,7 +479,7 @@ Each test case or stage-level result MUST emit one `TestReport` object:
   "stage": "static | unit | contract | api | integration | replay | snapshot | e2e",
   "status": "passed | failed | flaky | skipped",
   "failure_type": "api | scheduler | integration | contract | data_model | ui | observability | leak | null",
-  "error_category": "network | parsing | llm | validation_llm_error | database | validation | unknown | null",
+  "error_category": "network | parsing | llm | validation_llm_error | database | validation | timeout | unknown | null",
   "trace_id": "...",
   "fixture_set": "...",
   "mock_set": "...",
@@ -546,7 +547,7 @@ Output rules:
 
 - CI MUST persist the full report collection as JSON.
 - Human-readable logs MAY be generated from the structured report, but MUST NOT be the source of truth.
-- Report fields MUST NOT contain `content_raw`、`content_full`、完整 prompt、密钥或超过 `1024` 字符的正文片段。
+- Report fields MUST NOT contain `content_raw`、`content_full`、`is_deleted`、完整 prompt、密钥或超过 `1024` 字符的正文片段。
 - Failure routing MUST use `stage`、`failure_type`、`error_category`、`node` and `trace_id`, not free-form error text.
 - AI automatic repair MUST consume this report contract before reading raw logs.
 
@@ -613,7 +614,7 @@ assertion_policy:
 - End-to-end deterministic run 必须 pass。
 - UI tests 无 crash。
 - `GET /api/home` 和 `GET /api/news/{id}` 不暴露非法字段。
-- `translated` item 必须有中文正文详情。
+- `translated` item 必须有中文摘要和中文正文详情。
 - `ready` / `translation_failed` item 必须省略中文摘要和中文正文。
 - LLM mock tests 和 RSS fixture tests 不访问外部网络。
 - 重复 RSS item 不产生重复展示新闻。

@@ -1,0 +1,58 @@
+
+Loop Readiness Audit — /home/liuxuan/work/rss_loop
+══════════════════════════════════════════════════
+Score: 100/100  Level: L3
+Strong loop readiness — good candidate for L3 with explicit gates.
+
+Findings:
+  ✓ State file(s): STATE.md, pr-babysitter-state.md, ci-sweeper-state.md, post-merge-state.md, dependency-sweeper-state.md, changelog-drafter-state.md, issue-triage-state.md
+  ✓ Triage skill present.
+  ✓ Verifier skill present.
+  ✓ Safety documentation present.
+  ✓ .github/ with workflows present (strong dogfooding signal).
+  ✓ loop-budget.md present.
+  ✓ loop-run-log.md present.
+  ✓ loop-budget skill present.
+  ✓ Loop activity detected — real usage signals present (4 sources).
+
+Docs: docs/loop-design-checklist.md
+Tip: rerun with --suggest for ready-to-paste copy commands from templates/starters.
+
+
+=== Suggested actions (copy & customize) ===
+From the root of this repo (or after cloning the reference):
+
+  # Minimal L1 daily triage — pick your tool
+  # Grok:
+  cp -r starters/minimal-loop/.grok/skills/loop-triage .grok/skills/
+  # Claude Code:
+  cp -r starters/minimal-loop-claude/.claude/skills/loop-triage .claude/skills/
+  cp starters/minimal-loop-claude/.claude/agents/loop-verifier.md .claude/agents/
+  # Codex:
+  cp -r starters/minimal-loop-codex/.codex/skills/loop-triage .codex/skills/
+  cp starters/minimal-loop-codex/.codex/agents/verifier.toml .codex/agents/
+  # All tools:
+  cp starters/minimal-loop/STATE.md.example STATE.md   # or -claude / -codex variant
+  cp starters/minimal-loop/LOOP.md .
+  cp templates/loop-budget.md.template loop-budget.md
+  cp templates/loop-run-log.md.template loop-run-log.md
+
+  # Maker/checker verifier (Grok / generic skills dir)
+  mkdir -p .grok/skills/loop-verifier
+  cp templates/SKILL.md.verifier .grok/skills/loop-verifier/SKILL.md
+
+  # Common minimal fix action
+  mkdir -p .grok/skills/minimal-fix
+  cp templates/SKILL.md.minimal-fix .grok/skills/minimal-fix/SKILL.md
+
+  # For PR babysitter / CI sweeper patterns, copy the corresponding starter
+  # Then run:  loop-audit . --suggest   (again after changes)
+
+  # Or scaffold automatically:
+  npx @cobusgreyling/loop-init . --pattern daily-triage --tool grok
+  npx @cobusgreyling/loop-cost --pattern daily-triage --level L1
+
+  # IMPORTANT (v1.4): After scaffolding, actually RUN a loop (report-only) and commit the updated STATE.md.
+  # This creates the "loopActivity" evidence that pushes you toward real L2/L3 scores.
+
+See docs/loop-design-checklist.md and patterns/ for full guidance.
